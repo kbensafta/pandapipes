@@ -18,3 +18,4 @@ doc/build/*
 tutorials/.ipynb_checkpoints
 pandapipes/data/*
 pandapipes.egg-info/
+pandapipes/test/mixture_networks/*

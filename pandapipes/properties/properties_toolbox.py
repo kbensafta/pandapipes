@@ -3,6 +3,8 @@
 # Use of this source code is governed by a BSD-style license that can be found in the LICENSE file.
 
 import numpy as np
+from scipy.optimize import newton
+from pandapipes.constants import R_UNIVERSAL, P_CONVERSION, NORMAL_TEMPERATURE, NORMAL_PRESSURE
 
 
 def calculate_mixture_viscosity(components_viscosities, components_molar_proportions,
@@ -40,7 +42,6 @@ def calculate_mixture_viscosity(components_viscosities, components_molar_proport
         com_array[:, :, 4] = com_array[:, :, 1] * np.sqrt(com_array[:, :, 2])
         res = com_array[:, :, 3].sum(axis=0) / com_array[:, :, 4].sum(axis=0)
     return res
-
 
 def calculate_mixture_density(components_density, components_mass_proportions):
     """
@@ -218,6 +219,47 @@ def calculate_mixture_compressibility(components_compressibility, components_mas
         com_array[:, :, 1] = components_compressibility
         com_array[:, :, 2] = com_array[:, :, 1] * com_array[:, :, 0]
         res = com_array[:, :, 2].sum(axis=0)
+    return res
+
+def calculate_mixture_compressibility_SRK(T_K, p_bar,components_critical_temperature, components_critical_pressure,
+                                          components_acentric_factor, component_molar_proportions):
+    """
+    Todo: Needs to be checked
+
+    :param component_molar_proportions:
+    :type component_molar_proportions:
+    :param component_molar_mass:
+    :type component_molar_mass:
+    :return:
+    :rtype:
+    """
+    p_Pa = (p_bar + NORMAL_PRESSURE) * P_CONVERSION
+
+    shape = np.shape(component_molar_proportions)
+    if len(shape) == 1:
+        com_array = np.empty([shape[0], 6], dtype=np.float64)
+        com_array[:, 0] = component_molar_proportions
+        com_array[:, 1] = components_critical_temperature
+        com_array[:, 2] = components_critical_pressure
+        com_array[:, 3] = components_acentric_factor
+        com_array[:, 4] = 0.480 + 1.574 * com_array[:, 3] - 0.176 * com_array[:, 3]**2
+        com_array[:, 5] = (1 + com_array[:, 4] * (1 - (T_K/com_array[:, 1])**0.5))
+        SRK_A = 0.42747 * p_Pa / T_K ** 2 * (
+            (com_array[:, 0] * com_array[:, 1] * com_array[:, 5] / com_array[:, 2] ** 0.5).sum()) ** 2
+        SRK_B = 0.08664 * p_Pa / T_K * (com_array[:, 0] * com_array[:, 1] / com_array[:, 2]).sum()
+        res = newton(lambda Z: Z ** 3 - Z ** 2 + Z * (SRK_A - SRK_B - SRK_B ** 2) - SRK_A * SRK_B, 0.9)
+    else:
+        com_array = np.empty([shape[0], shape[1], 6], dtype=np.float64)
+        com_array[:, :, 0] = component_molar_proportions
+        com_array[:, :, 1] = components_critical_temperature
+        com_array[:, :, 2] = components_critical_pressure
+        com_array[:, :, 3] = components_acentric_factor
+        com_array[:, :, 4] = 0.480 + 1.574 * com_array[:, 3] - 0.176 * com_array[:, 3]**2
+        com_array[:, :, 5] = (1 + com_array[:, 4] * (1 - (T_K/com_array[:, 1])**0.5))
+        SRK_A = 0.42747 * p_Pa / T_K ** 2 * (
+            (com_array[:, :, 0] * com_array[:, :, 1] * com_array[:, :, 5] / com_array[:, :, 2] ** 0.5).sum()) ** 2
+        SRK_B = 0.08664 * p_Pa / T_K * (com_array[:, :, 0] * com_array[:, :, 1] / com_array[:, :, 2]).sum()
+        res = newton(lambda Z: Z ** 3 - Z ** 2 + Z * (SRK_A - SRK_B - SRK_B ** 2) - SRK_A * SRK_B, 0.9)
     return res
 
 

@@ -120,7 +120,7 @@ class Pipe(BranchWInternalsComponent):
             np.repeat(net[cls.table_name()][cls.active_identifier()].values, int_node_number)
         if len(net._fluid) == 1:
             junction_pit[:, net['_idx_node']['RHO']] = \
-                get_fluid(net, net._fluid[0]).get_density(junction_pit[:, net['_idx_node']['TINIT']])
+                get_fluid(net, net._fluid[0]).get_density()
 
     @classmethod
     def create_pit_branch_entries(cls, net, branch_pit):

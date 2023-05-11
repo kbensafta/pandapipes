@@ -200,15 +200,15 @@ class BranchWInternalsComponent(BranchComponent):
 
         if len(net._fluid) == 1:
             branch_w_internals_pit[:, net['_idx_branch']['RHO']] = \
-                get_fluid(net, net._fluid[0]).get_density(branch_w_internals_pit[:, net['_idx_branch']['TINIT']])
+                get_fluid(net, net._fluid[0]).get_density()
             branch_w_internals_pit[:, net['_idx_branch']['ETA']] = \
                 get_fluid(net, net._fluid[0]).get_viscosity(branch_w_internals_pit[:, net['_idx_branch']['TINIT']])
             branch_w_internals_pit[:, net['_idx_branch']['CP']] = \
-                get_fluid(net, net._fluid[0]).get_heat_capacity(branch_w_internals_pit[:, net['_idx_branch']['TINIT']])
+                get_fluid(net, net._fluid[0]).get_heat_capacity(branch_w_internals_pit[:, net['_idx_branch']['TINIT']], p_bar=branch_w_internals_pit[:, net['_idx_node']['PINIT']])
         else:
             for fluid in net._fluid:
                 branch_w_internals_pit[:, net['_idx_branch'][fluid + '_RHO']] = \
-                    get_fluid(net, fluid).get_density(branch_w_internals_pit[:, net['_idx_branch']['TINIT']])
+                    get_fluid(net, fluid).get_density()
 
         return branch_w_internals_pit, internal_pipe_number
 

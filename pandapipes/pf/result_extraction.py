@@ -58,7 +58,7 @@ def get_basic_branch_results(net, branch_pit, node_pit):
     t1 = node_pit[to_nodes, net['_idx_node']['TINIT']]
     mf = branch_pit[:, net['_idx_branch']['LOAD_VEC_NODES']]
     if len(net._fluid) == 1:
-        density = get_fluid(net, net._fluid[0]).get_density((t0 + t1) / 2)
+        density = get_fluid(net, net._fluid[0]).get_density()
     else:
         w = get_lookup(net, 'branch', 'w')
         mass_fract = branch_pit[:, w]

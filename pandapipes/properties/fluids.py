@@ -1,17 +1,25 @@
 # Copyright (c) 2020-2022 by Fraunhofer Institute for Energy Economics
 # and Energy System Technology (IEE), Kassel, and University of Kassel. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be found in the LICENSE file.
-
+import itertools
 import os
 
 import numpy as np
 import pandas as pd
 from scipy.interpolate import interp1d
+import CoolProp
+from CoolProp.CoolProp import PropsSI
+from chemicals.identifiers import IDs_to_CASs, MW
+from chemicals.critical import Tc, Pc, Zc
+from chemicals import dipole_moment
+from chemicals.vectorized.viscosity import Wilke
+from chemicals.vectorized import Lucas_gas, lemmon2000_rho, lemmon2000_air_MW
 
 from pandapipes import pp_dir
 from pandapipes.properties.properties_toolbox import calculate_mixture_density, calculate_mixture_viscosity, \
     calculate_mixture_molar_mass, calculate_molar_fraction_from_mass_fraction, calculate_mixture_heat_capacity, \
     calculate_mixture_compressibility, calculate_mixture_calorific_values, calculate_mass_fraction_from_molar_fraction
+from pandapipes.constants import P_CONVERSION, NORMAL_PRESSURE, NORMAL_TEMPERATURE
 from pandapower.io_utils import JSONSerializableClass
 
 try:
@@ -108,7 +116,7 @@ class Fluid(JSONSerializableClass):
                               % (property_name, self.name))
         return self.all_properties[property_name].get_at_value(*at_values)
 
-    def get_density(self, temperature):
+    def get_density(self, temperature=NORMAL_TEMPERATURE, pressure=NORMAL_PRESSURE, phase='gas', mode='quality'):
         """
         This function returns the density at a certain temperature.
 
@@ -117,10 +125,42 @@ class Fluid(JSONSerializableClass):
         :return: Density at the required temperature
 
         """
+        if phase == 'gas':
+            if self.name == 'hgas':
+                density = 0.8047119641901379
+            elif self.name == 'lgas':
+                density = 0.8261278456699505
+            else:
+                if mode == 'performance':
+                    method = 'SRK'
+                elif mode == 'quality':
+                    method = 'HEOS'
+                else:
+                    logger.error("Mode is ambigious. Please choose 'quality' or 'performance' ")
+                fluid = CoolProp.AbstractState('HEOS', self.name)
+                fluid.specify_phase(CoolProp.iphase_gas)
+                fluid.update(CoolProp.PT_INPUTS, NORMAL_PRESSURE, NORMAL_TEMPERATURE)
+                density = fluid.rhomass()
+        elif phase == 'liquid':
+            if mode == 'performance':
+                if self.name == 'water':
+                    fluid = CoolProp.AbstractState('IF97', 'Water')
+                    fluid.update(CoolProp.PT_INPUTS, pressure * P_CONVERSION, temperature)
+                    density = fluid.rhomass()
+                else:
+                    fluid = CoolProp.AbstractState("INCOMP", self.name)
+                    fluid.update(CoolProp.PT_INPUTS, pressure * P_CONVERSION, temperature)
+                    density = fluid.rhomass()
+            elif mode == 'quality':
+                fluid = CoolProp.AbstractState('HEOS', self.name)
+                fluid.specify_phase(CoolProp.iphase_liquid)
+                fluid.update(CoolProp.PT_INPUTS, pressure * P_CONVERSION, temperature)
+                density = fluid.rhomass()
+        else:
+            logger.error("Phase is undefined. Please check your input")
+        return density
 
-        return self.get_property("density", temperature)
-
-    def get_viscosity(self, temperature):
+    def get_viscosity(self, temperature, p_bar=NORMAL_PRESSURE, phase='gas', mode='performance'):
         """
         This function returns the viscosity at a certain temperature.
 
@@ -129,10 +169,107 @@ class Fluid(JSONSerializableClass):
         :return: Viscosity at the required temperature
 
         """
+        if not mode == 'quality' and not mode == 'performance':
+            logger.error("Mode is not valid. Please choose 'quality' or 'performance' ")
 
-        return self.get_property("viscosity", temperature)
+        if phase == 'gas':
+            if self.name == 'hgas':
+                CAS = ['74-82-8', '7727-37-9', '124-38-9', '74-84-0', '74-98-6', '106-97-8', '109-66-0', '110-54-3']
+                mole_fractions = [0.8957, 0.0159, 0.0077, 0.0615, 0.0125, 0.0048, 0.0009, 0.001]
+                molar_mass_list = [16.043, 28.0134, 44.0095, 30.07, 44.097, 58.124, 72.151, 86.178]
+                t_crit = [190.564, 126.2, 304.2, 305.32, 369.83, 425.12, 469.7, 507.6]
+                p_crit = [4599000.0, 3394387.5, 7376460.0, 4872000.0, 4248000.0, 3796000.0, 3370000.0, 3025000.0]
+                z_crit = [0.286, 0.29, 0.274, 0.279, 0.277, 0.274, 0.268, 0.264]
+                dipole_moment_dbye = [0.0, 0.0, 0.0, 0.0, 0.08, 0.0, 0.0, 0.0]
+                if mode == 'performance':
+                    viscosity_list = [Lucas_gas(temperature, t_crit[i], p_crit[i], z_crit[i], molar_mass_list[i], dipole_moment_dbye[i]) for i in range(len(CAS))]
+                    dyn_viscosity = Wilke(mole_fractions, viscosity_list, molar_mass_list)
+                elif mode == 'quality':
+                    viscosity_hgas = CoolProp.AbstractState("HEOS",
+                                                            'Methane&Nitrogen&CarbonDioxide&Ethane&Propane&Butane&Pentane&Hexane')
+                    viscosity_hgas.set_mole_fractions(mole_fractions)
+                    viscosity_hgas.specify_phase(CoolProp.iphase_gas)
+                    viscosity_hgas.update(CoolProp.PT_INPUTS, p_bar * P_CONVERSION, temperature)
+                    dyn_viscosity = viscosity_hgas.viscosity()
+                else:
+                    logger.error("Mode is not valid. Please choose 'quality' or 'performance' ")
 
-    def get_heat_capacity(self, temperature):
+            elif self.name == 'lgas':
+                CAS = ['74-82-8', '7727-37-9', '124-38-9', '74-84-0', '74-98-6', '106-97-8', '109-66-0', '110-54-3']
+                mole_fractions = [0.8433, 0.0981, 0.0145, 0.0341, 0.006, 0.0023, 0.001, 0.0007]
+                molar_mass_list = [16.043, 28.0134, 44.0095, 30.07, 44.097, 58.124, 72.151, 86.178]
+                t_crit = [190.564, 126.2, 304.2, 305.32, 369.83, 425.12, 469.7, 507.6]
+                p_crit = [4599000.0, 3394387.5, 7376460.0, 4872000.0, 4248000.0, 3796000.0, 3370000.0, 3025000.0]
+                z_crit = [0.286, 0.29, 0.274, 0.279, 0.277, 0.274, 0.268, 0.264]
+                dipole_moment_dbye = [0.0, 0.0, 0.0, 0.0, 0.08, 0.0, 0.0, 0.0]
+                if mode == 'performance':
+                    viscosity_list = [Lucas_gas(temperature, t_crit[i], p_crit[i], z_crit[i],
+                                                molar_mass_list[i], dipole_moment_dbye[i]) for i in range(len(CAS))]
+                    dyn_viscosity = Wilke(mole_fractions, viscosity_list, molar_mass_list)
+                elif mode == 'quality':
+                    viscosity_lgas = CoolProp.AbstractState("HEOS",
+                                                            'Methane&Nitrogen&CarbonDioxide&Ethane&Propane&Butane&Pentane&Hexane')
+                    viscosity_lgas.set_mole_fractions(mole_fractions)
+                    viscosity_lgas.specify_phase(CoolProp.iphase_gas)
+                    viscosity_lgas.update(CoolProp.PT_INPUTS, p_bar * P_CONVERSION, temperature)
+                    dyn_viscosity = viscosity_lgas.viscosity()
+                else:
+                    logger.error("Mode is not valid. Please choose 'quality' or 'performance' ")
+            elif self.name == 'carbondioxide':
+                CAS = '124-38-9'
+                t_crit = 304.2
+                p_crit = 7376460.0
+                z_crit = 0.274
+                mole_mass = 44.0095
+                dipole_moment_dbye = 0.0
+                if mode == 'performance':
+                    dyn_viscosity = Lucas_gas(temperature, t_crit, p_crit, z_crit, mole_mass, dipole_moment_dbye)
+                elif mode == 'quality':
+                    dyn_viscosity = PropsSI("V", "P", p_bar * P_CONVERSION, "T", temperature, CAS)
+                else:
+                    logger.error("Mode is not valid. Please choose 'quality' or 'performance' ")
+            elif self.name == 'air':
+                viscosity_air = CoolProp.AbstractState('HEOS', "Air")
+                viscosity_air.specify_phase(CoolProp.iphase_gas)
+                viscosity_air.update(CoolProp.PT_INPUTS, p_bar * P_CONVERSION, temperature)
+                dyn_viscosity = viscosity_air.viscosity()
+            else:
+                CAS = IDs_to_CASs(self.name)[0]
+                if mode == 'performance':
+                    dyn_viscosity = Lucas_gas(temperature, Tc(CAS), Pc(CAS), Zc(CAS), MW(CAS), dipole_moment(CAS))
+                elif mode == 'quality':
+                    dyn_viscosity = PropsSI("V", "P", p_bar * P_CONVERSION, "T", temperature, CAS)
+                else:
+                    logger.error("Mode is not valid. Please choose 'quality' or 'performance' ")
+        elif phase == 'liquid':
+            if self.name == 'water':
+                if mode == 'performance':
+                    viscosity_water = CoolProp.AbstractState("IF97", "Water")
+                    viscosity_water.update(CoolProp.PT_INPUTS, p_bar * P_CONVERSION, temperature)
+                    dyn_viscosity = viscosity_water.viscosity()
+                elif mode == 'quality':
+                    viscosity_water = CoolProp.AbstractState("HEOS", "Water")
+                    viscosity_water.specify_phase(CoolProp.iphase_liquid)
+                    viscosity_water.update(CoolProp.PT_INPUTS, p_bar * P_CONVERSION, temperature)
+                    dyn_viscosity = viscosity_water.viscosity()
+                else:
+                    logger.error("Mode is not valid. Please choose 'quality' or 'performance' ")
+            else:
+                if mode == 'performance':
+                    viscosity_liquid = CoolProp.AbstractState("INCOMP", self.name)
+                    viscosity_liquid.specify_phase(CoolProp.iphase_liquid)
+                    viscosity_liquid.update(CoolProp.PT_INPUTS, p_bar * P_CONVERSION, temperature)
+                    dyn_viscosity = viscosity_liquid.viscosity()
+                elif mode == 'quality':
+                    viscosity_liquid = CoolProp.AbstractState("HEOS", self.name)
+                    viscosity_liquid.specify_phase(CoolProp.iphase_liquid)
+                    viscosity_liquid.update(CoolProp.PT_INPUTS, p_bar * P_CONVERSION, temperature)
+                    dyn_viscosity = viscosity_liquid.viscosity()
+                else:
+                    logger.error("Mode is not valid. Please choose 'quality' or 'performance' ")
+        return dyn_viscosity
+
+    def get_heat_capacity(self, temperature, p_bar=1.01325, mode="performance", phase="gas"):
         """
         This function returns the heat capacity at a certain temperature.
 
@@ -141,8 +278,81 @@ class Fluid(JSONSerializableClass):
         :return: Heat capacity at the required temperature
 
         """
+        if phase == 'gas':
+            if self.name == 'hgas':
+                if mode == 'performance':
 
-        return self.get_property("heat_capacity", temperature)
+                    heat_capacity_hgas = CoolProp.AbstractState("SRK", 'Methane&Nitrogen&CarbonDioxide&Ethane&Propane&Butane&Pentane&Hexane')
+                elif mode == 'quality':
+                    heat_capacity_hgas = CoolProp.AbstractState("HEOS",
+                                                                'Methane&Nitrogen&CarbonDioxide&Ethane&Propane&Butane&Pentane&Hexane')
+                else:
+                    logger.error("Mode is not valid. Please choose 'quality' or 'performance' ")
+
+                heat_capacity_array = np.empty(len(temperature), dtype=np.float64)
+                heat_capacity_hgas.set_mole_fractions([0.8957, 0.0159, 0.0077, 0.0615, 0.0125, 0.0048, 0.0009, 0.001])
+                heat_capacity_hgas.specify_phase(CoolProp.iphase_gas)
+                for i in range(len(temperature)):
+                    heat_capacity_hgas.update(CoolProp.PT_INPUTS, p_bar * P_CONVERSION, temperature[i])
+                    heat_capacity_array[i] = heat_capacity_hgas.cpmass()
+                heat_capacity = heat_capacity_array.copy()
+            elif self.name == 'lgas':
+                if mode == 'performance':
+                    heat_capacity_lgas = CoolProp.AbstractState("SRK",
+                                                                'Methane&Nitrogen&CarbonDioxide&Ethane&Propane&Butane&Pentane&Hexane')
+                elif mode == 'quality':
+                    heat_capacity_lgas = CoolProp.AbstractState("HEOS",
+                                                                'Methane&Nitrogen&CarbonDioxide&Ethane&Propane&Butane&Pentane&Hexane')
+                else:
+                    logger.error("Mode is not valid. Please choose 'quality' or 'performance' ")
+                heat_capacity_array = np.empty(len(temperature), dtype=np.float64)
+                heat_capacity_lgas.set_mole_fractions([0.8433, 0.0981, 0.0145, 0.0341, 0.006, 0.0023, 0.001, 0.0007])
+                heat_capacity_lgas.specify_phase(CoolProp.iphase_gas)
+                for i in range(len(temperature)):
+                    heat_capacity_lgas.update(CoolProp.PT_INPUTS, p_bar * P_CONVERSION, temperature[i])
+                    heat_capacity_array[i] = heat_capacity_lgas.cpmass()
+                heat_capacity = heat_capacity_array.copy()
+            else:
+                if mode == 'performance':
+                    heat_capacity_AS = CoolProp.AbstractState('SRK', self.name)
+                elif mode == 'quality':
+                    heat_capacity_AS = CoolProp.AbstractState('HEOS', self.name)
+                else:
+                    logger.error("Mode is not valid. Please choose 'quality' or 'performance' ")
+                heat_capacity_array = np.empty([len(temperature)], dtype=np.float64)
+                heat_capacity_AS.specify_phase(CoolProp.iphase_gas)
+                for i in range(len(temperature)):
+                    heat_capacity_AS.update(CoolProp.PT_INPUTS, p_bar * P_CONVERSION, temperature[i])
+                    heat_capacity_array[i] = heat_capacity_AS.cpmass()
+                heat_capacity = heat_capacity_array.copy()
+        elif phase == 'liquid':
+            if self.name == 'water':
+                if mode == 'performance':
+                    heat_capacity_water = CoolProp.AbstractState("IF97", "Water")
+                elif mode == 'quality':
+                    heat_capacity_water = CoolProp.AbstractState("HEOS", "Water")
+                else:
+                    logger.error("Mode is not valid. Please choose 'quality' or 'performance' ")
+                heat_capacity_array = np.empty(len(temperature), dtype=np.float64)
+                heat_capacity_water.specify_phase(CoolProp.iphase_liquid)
+                for i in range(len(temperature)):
+                    heat_capacity_water.update(CoolProp.PT_INPUTS, p_bar[i] * P_CONVERSION, temperature[i])
+                    heat_capacity_array[i] = heat_capacity_water.cpmass()
+                heat_capacity = heat_capacity_water.cpmass()
+            else:
+                if mode == 'performance':
+                    heat_capacity_liquid = CoolProp.AbstractState("INCOMP", self.name)
+                elif mode == 'quality':
+                    heat_capacity_liquid = CoolProp.AbstractState("HEOS", self.name)
+                else:
+                    logger.error("Mode is not valid. Please choose 'quality' or 'performance' ")
+                heat_capacity_array = np.empty(len(temperature), dtype=np.float64)
+                heat_capacity_liquid.specify_phase(CoolProp.iphase_liquid)
+                for i in range(len(temperature)):
+                    heat_capacity_liquid.update(CoolProp.PT_INPUTS, p_bar[i] * P_CONVERSION, temperature[i])
+                    heat_capacity_array[i] = heat_capacity_liquid.cpmass()
+                heat_capacity = heat_capacity_liquid.cpmass()
+        return heat_capacity
 
     def get_molar_mass(self):
         """
@@ -151,10 +361,19 @@ class Fluid(JSONSerializableClass):
         :return: molar mass
 
         """
+        if self.name == 'hgas':
+            molar_mass = 17.984362784
+        elif self.name == 'lgas':
+            molar_mass = 18.471238304
+        elif self.name == 'carbondioxide':
+            molar_mass = 44.0098
+        elif self.name == 'air':
+            molar_mass = 28.96546
+        else:
+            molar_mass = MW(self.name)
+        return molar_mass
 
-        return self.get_property("molar_mass")
-
-    def get_compressibility(self, p_bar):
+    def get_compressibility(self, p_bar, temperature = np.array([285.15]), mode='quality'):
         """
         This function returns the compressibility at a certain pressure.
 
@@ -163,18 +382,76 @@ class Fluid(JSONSerializableClass):
         :return: compressibility at the required pressure
 
         """
+        if self.name == 'hgas':
+            compressibility_hgas_norm = 0.9970936857549283
+            if mode == 'performance':
+                compressibility_hgas = CoolProp.AbstractState("SRK",
+                                                              'Methane&Nitrogen&CarbonDioxide&Ethane&Propane&Butane&Pentane&Hexane')
+            elif mode == 'quality':
+                compressibility_hgas = CoolProp.AbstractState("HEOS",
+                                                              'Methane&Nitrogen&CarbonDioxide&Ethane&Propane&Butane&Pentane&Hexane')
+            else:
+                logger.error("Mode is not valid. Please choose 'quality' or 'performance' ")
 
-        return self.get_property("compressibility", p_bar)
+            compressibility_hgas_array = np.empty(len(p_bar), dtype=np.float64)
+            compressibility_hgas.set_mole_fractions([0.8957, 0.0159, 0.0077, 0.0615, 0.0125, 0.0048, 0.0009, 0.001])
+            compressibility_hgas.specify_phase(CoolProp.iphase_gas)
+            for i in range(len(p_bar)):
+                compressibility_hgas.update(CoolProp.PT_INPUTS, p_bar[i], temperature)
+                compressibility_hgas_array[i] = compressibility_hgas.compressibility_factor()
+            compressibility_factor_hgas = compressibility_hgas_array.copy()
+            gas_law_deviation_coefficient = compressibility_factor_hgas / compressibility_hgas_norm
+        elif self.name == 'lgas':
+            compressibility_lgas_norm = 0.9975395425980074
+            if mode == 'performance':
+                compressibility_lgas = CoolProp.AbstractState("SRK",
+                                                              'Methane&Nitrogen&CarbonDioxide&Ethane&Propane&Butane&Pentane&Hexane')
+            elif mode == 'quality':
+                compressibility_lgas = CoolProp.AbstractState("HEOS",
+                                                              'Methane&Nitrogen&CarbonDioxide&Ethane&Propane&Butane&Pentane&Hexane')
+            else:
+                logger.error("Mode is not valid. Please choose 'quality' or 'performance' ")
 
-    def get_der_compressibility(self):
+            compressibility_lgas_array = np.empty(len(p_bar), dtype=np.float64)
+            compressibility_lgas.set_mole_fractions([0.8957, 0.0159, 0.0077, 0.0615, 0.0125, 0.0048, 0.0009, 0.001])
+            compressibility_lgas.specify_phase(CoolProp.iphase_gas)
+            for i in range(len(p_bar)):
+                compressibility_lgas.update(CoolProp.PT_INPUTS, p_bar[i], temperature)
+                compressibility_lgas_array[i] = compressibility_lgas.compressibility_factor()
+            compressibility_factor_lgas = compressibility_lgas_array.copy()
+            gas_law_deviation_coefficient = compressibility_factor_lgas / compressibility_lgas_norm
+        else:
+            if mode == 'performance':
+                compressibility_gas = CoolProp.AbstractState('SRK', self.name)
+                compressibility_gas_norm = CoolProp.AbstractState('SRK', self.name)
+            elif mode == 'quality':
+                compressibility_gas = CoolProp.AbstractState('HEOS', self.name)
+                compressibility_gas_norm = CoolProp.AbstractState('HEOS', self.name)
+            else:
+                logger.error("Mode is not valid. Please choose 'quality' or 'performance' ")
+
+            compressibility_gas_array = np.empty(len(p_bar), dtype=np.float64)
+            compressibility_gas.specify_phase(CoolProp.iphase_gas)
+            compressibility_gas_norm.specify_phase(CoolProp.iphase_gas)
+            for i in range(len(p_bar)):
+                compressibility_gas.update(CoolProp.PT_INPUTS, p_bar[i], temperature)
+                compressibility_gas_array[i] = compressibility_gas.compressibility_factor()
+            compressibility_gas_norm.update(CoolProp.PT_INPUTS, NORMAL_PRESSURE, NORMAL_TEMPERATURE)
+            compressibility_factor_gas = compressibility_gas_array.copy()
+            compressibility_factor_gas_norm = compressibility_gas_norm.compressibility_factor()
+            gas_law_deviation_coefficient = compressibility_factor_gas / compressibility_factor_gas_norm
+        return gas_law_deviation_coefficient
+
+    def get_der_compressibility(self, p_bar=np.array([1.01325])):
         """
         This function returns the derivative of the compressibility with respect to pressure.
 
         :return: derivative of the compressibility
 
         """
-
-        return self.get_property("der_compressibility")
+        #der_gldc = (self.get_compressibility(p_bar * P_CONVERSION) - 1) / p_bar
+        der_gldc = -0.022
+        return der_gldc
 
     def get_lower_heating_value(self):
         return self.get_property("lhv")
@@ -714,38 +991,145 @@ def get_property(net, property_name, fluid_name=None, *at_values):
     else:
         return net.fluid[fluid_name].get_property(property_name, *at_values)
 
-
 def get_mixture_molar_mass(net, mass_fraction):
-    molar_mass_list = [net.fluid[fluid].get_molar_mass() for fluid in net._fluid]
-    return calculate_mixture_molar_mass(molar_mass_list, component_proportions=mass_fraction)
+    fluid_list = net._fluid.copy()
+    MW_list = np.empty(len(fluid_list), dtype=np.float64)
+    for i in range(len(fluid_list)):
+        if fluid_list[i] == 'hgas':
+            MW_list[i] = 17.984362784
+        elif fluid_list[i] == 'lgas':
+            MW_list[i] = 18.471238304
+        elif fluid_list[i] == 'carbondioxide':
+            MW_list[i] = 44.0098
+        else:
+            MW_list[i] = MW(fluid_list[i])
+    return calculate_mixture_molar_mass(MW_list, component_proportions=mass_fraction)
 
 
-def get_mixture_density(net, temperature, mass_fraction):
-    density_list = [net.fluid[fluid].get_density(temperature) for fluid in net._fluid]
-    return calculate_mixture_density(density_list, mass_fraction.T)
+def get_mixture_density(net, temperature, mass_fraction, mode="quality"):
+    print(np.shape(mass_fraction))
+    density_list = np.empty(len(mass_fraction), dtype=np.float64)
+    fluid_list = '&'.join(net._fluid)
+    if mode == 'performance':
+        density_mixture = CoolProp.AbstractState('SRK', fluid_list)
+        for i in range(len(mass_fraction)):
+            density_mixture.set_mass_fractions(mass_fraction[i])
+            density_mixture.update(CoolProp.PT_INPUTS, NORMAL_PRESSURE * P_CONVERSION, NORMAL_TEMPERATURE)
+            density_list[i] = density_mixture.rhomass()
+    elif mode == 'quality':
+        density_mixture = CoolProp.AbstractState('HEOS', fluid_list)
+        for i in range(len(mass_fraction)):
+            density_mixture.set_mass_fractions(mass_fraction[i])
+            density_mixture.update(CoolProp.PT_INPUTS, NORMAL_PRESSURE * P_CONVERSION, NORMAL_TEMPERATURE)
+            density_list[i] = density_mixture.rhomass()
+    else:
+        logger.error('Mode is not available. Check your input.')
+    return density_list
 
+def get_mixture_viscosity(net, temperature, mass_fraction, pressure=np.array([NORMAL_PRESSURE]), mode='performance'):
+    if not mode == 'quality' and not mode == 'performance':
+        logger.error("Mode is not valid. Please choose 'quality' or 'performance' ")
 
-def get_mixture_viscosity(net, temperature, mass_fraction):
-    viscosity_list, molar_mass_list = [], []
-    for fluid in net._fluid:
-        viscosity_list += [net.fluid[fluid].get_viscosity(temperature)]
-        molar_mass_list += [net.fluid[fluid].get_molar_mass()]
-    molar_fraction = calculate_molar_fraction_from_mass_fraction(mass_fraction.T, np.array(molar_mass_list))
-    return calculate_mixture_viscosity(viscosity_list, molar_fraction, np.array(molar_mass_list).T)
-
+    fluid_list = net._fluid.copy()
+    viscosity_list = np.empty(len(fluid_list), dtype=np.float64)
+    molar_weight_list = np.empty(len(fluid_list), dtype=np.float64)
+    for i in range(len(fluid_list)):
+        if fluid_list[i] == 'hgas':
+            CAS = ['74-82-8', '7727-37-9', '124-38-9', '74-84-0', '74-98-6', '106-97-8', '109-66-0', '110-54-3']
+            mole_fractions = [0.8957, 0.0159, 0.0077, 0.0615, 0.0125, 0.0048, 0.0009, 0.001]
+            molar_mass_list = [16.043, 28.0134, 44.0095, 30.07, 44.097, 58.124, 72.151, 86.178]
+            t_crit = [190.564, 126.2, 304.2, 305.32, 369.83, 425.12, 469.7, 507.6]
+            p_crit = [4599000.0, 3394387.5, 7376460.0, 4872000.0, 4248000.0, 3796000.0, 3370000.0, 3025000.0]
+            z_crit = [0.286, 0.29, 0.274, 0.279, 0.277, 0.274, 0.268, 0.264]
+            dipole_moment_dbye = [0.0, 0.0, 0.0, 0.0, 0.08, 0.0, 0.0, 0.0]
+            if mode == 'performance':
+                viscosity = [Lucas_gas(temperature, t_crit[i], p_crit[i], z_crit[i],
+                                       molar_mass_list[i], dipole_moment_dbye[i]) for i in range(len(CAS))]
+            else:
+                viscosity = [PropsSI("V", "P", 1.01325 * P_CONVERSION, "T", temperature, fluid) for fluid in CAS]
+            viscosity_list[i] = Wilke(mole_fractions, viscosity, molar_mass_list)
+            molar_weight_list[i] = 17.984362784
+        elif fluid_list[i] == 'lgas':
+            CAS = ['74-82-8', '7727-37-9', '124-38-9', '74-84-0', '74-98-6', '106-97-8', '109-66-0', '110-54-3']
+            mole_fractions = [0.8433, 0.0981, 0.0145, 0.0341, 0.006, 0.0023, 0.001, 0.0007]
+            molar_mass_list = [16.043, 28.0134, 44.0095, 30.07, 44.097, 58.124, 72.151, 86.178]
+            t_crit = [190.564, 126.2, 304.2, 305.32, 369.83, 425.12, 469.7, 507.6]
+            p_crit = [4599000.0, 3394387.5, 7376460.0, 4872000.0, 4248000.0, 3796000.0, 3370000.0, 3025000.0]
+            z_crit = [0.286, 0.29, 0.274, 0.279, 0.277, 0.274, 0.268, 0.264]
+            dipole_moment_dbye = [0.0, 0.0, 0.0, 0.0, 0.08, 0.0, 0.0, 0.0]
+            if mode == 'performance':
+                viscosity = [Lucas_gas(temperature, t_crit[i], p_crit[i], z_crit[i],
+                                       molar_mass_list[i], dipole_moment_dbye[i]) for i in range(len(CAS))]
+            else:
+                viscosity = [PropsSI("V", "P", 1.01325 * P_CONVERSION, "T", temperature, fluid) for fluid in CAS]
+            viscosity_list[i] = Wilke(mole_fractions, viscosity, molar_mass_list)
+            molar_weight_list[i] = 18.471238304
+        elif fluid_list[i] == 'carbondioxide':
+            CAS = '124-38-9'
+            t_crit = 304.2
+            p_crit = 7376460.0
+            z_crit = 0.274
+            mole_mass = 44.0095
+            dipole_moment_dbye = 0.0
+            if mode == 'performance':
+                viscosity_list[i] = PropsSI("CPMASS", "P", pressure * P_CONVERSION, "T", temperature, "CO2")
+            else:
+                viscosity_list[i] = PropsSI("V", "P", NORMAL_PRESSURE * P_CONVERSION, "T", temperature, CAS)
+            molar_weight_list[i] = 44.0095
+        else:
+            CAS = IDs_to_CASs(fluid_list[i])[0]
+            if mode == 'performance':
+                t_crit = Tc(CAS)
+                p_crit = Pc(CAS)
+                z_crit = Zc(CAS)
+                mole_mass = MW(CAS)
+                dipole_moment_dbye = dipole_moment(CAS)
+                p = np.full(np.shape(temperature), 101325., dtype=np.float64)
+                viscosity_list[i] = PropsSI("V", "P", 101325., "T", 273.15, CAS)
+            else:
+                viscosity_list[i] = PropsSI("V", "P", NORMAL_PRESSURE * P_CONVERSION, "T", temperature, CAS)
+            molar_weight_list[i] = MW(fluid_list[i])
+    molar_fraction = calculate_molar_fraction_from_mass_fraction(mass_fraction.T, molar_weight_list)
+    viscosity = Wilke(molar_fraction, viscosity_list, molar_weight_list)
+    return viscosity
 
 def get_mixture_heat_capacity(net, temperature, mass_fraction):
     heat_capacity_list = [net.fluid[fluid].get_heat_capacity(temperature) for fluid in net._fluid]
     return calculate_mixture_heat_capacity(heat_capacity_list, mass_fraction.T)
 
+def get_mixture_compressibility(net, pressure, mass_fraction, temperature=NORMAL_TEMPERATURE, calc_mode="HEOS"):
+    compressibility_list = np.empty(len(mass_fraction), dtype=np.float64)
+    norm_compressibility_list = np.empty(len(mass_fraction), dtype=np.float64)
+    fluid_list = '&'.join(net._fluid)
+    compressibility_mixture = CoolProp.AbstractState(calc_mode, fluid_list)
+    norm_compressibility_mixture = CoolProp.AbstractState(calc_mode, fluid_list)
+    for i in range(len(mass_fraction)):
+        compressibility_mixture.set_mass_fractions(mass_fraction[i])
+        norm_compressibility_mixture.set_mass_fractions(mass_fraction[i])
+        compressibility_mixture.update(CoolProp.PT_INPUTS, pressure[i] * P_CONVERSION, temperature)
+        norm_compressibility_mixture.update(CoolProp.PT_INPUTS, NORMAL_PRESSURE, NORMAL_TEMPERATURE)
+        compressibility_list[i] = compressibility_mixture.compressibility_factor()
+        norm_compressibility_list[i] = norm_compressibility_mixture.compressibility_factor()
+    gldc_list = compressibility_list / norm_compressibility_list
+    return gldc_list
 
-def get_mixture_compressibility(net, pressure, mass_fraction):
-    compressibility_list = [net.fluid[fluid].get_property('compressibility', pressure) for fluid in net._fluid]
-    return calculate_mixture_compressibility(compressibility_list, mass_fraction.T)
-
-def get_mixture_der_cmpressibility(net, pressure, mass_fraction):
-    der_compressibility_list = [net.fluid[fluid].get_property('der_compressibility', pressure) for fluid in net._fluid]
-    return calculate_mixture_compressibility(der_compressibility_list, mass_fraction.T)
+def get_mixture_der_cmpressibility(net, pressure, mass_fraction, temperature=NORMAL_TEMPERATURE, calc_mode="HEOS"):
+    fluid_list = [net._fluid[i] for i in range(len(net._fluid))]
+    compressibility_list = np.empty(len(pressure))
+    compressibility_list_norm = np.empty(len(pressure))
+    fluid_list = [i.title() for i in fluid_list]
+    fluid_list = '&'.join(fluid_list)
+    compressibility_mixture = CoolProp.AbstractState(calc_mode, fluid_list)
+    compressibility_mixture_norm = CoolProp.AbstractState(calc_mode, fluid_list)
+    for i in range(len(pressure)):
+        compressibility_mixture.set_mass_fractions(mass_fraction[i])
+        compressibility_mixture.update(CoolProp.PT_INPUTS, pressure[i], temperature)
+        compressibility_mixture_norm.set_mass_fractions(mass_fraction[i])
+        compressibility_mixture_norm.update(CoolProp.PT_INPUTS, NORMAL_PRESSURE, NORMAL_TEMPERATURE)
+        compressibility_list[i] = compressibility_mixture.compressibility_factor()
+        compressibility_list_norm[i] = compressibility_mixture.compressibility_factor()
+    gldc_param_list = compressibility_list / compressibility_list_norm - 1
+    return gldc_param_list
 
 
 def get_mixture_higher_heating_value(net, mass_fraction):
@@ -785,7 +1169,7 @@ def create_individual_fluid(fluid_name, fluid_components,
     for fl_co in fluid_components:
         fluid = call_lib(fl_co)
         molar_mass += [fluid.get_molar_mass()]
-        density += [fluid.get_density(temperature_list)]
+        density += [fluid.get_density()]
         viscosity += [fluid.get_viscosity(temperature_list)]
         heat_capacity += [fluid.get_heat_capacity(temperature_list)]
         compressibility += [fluid.get_property('compressibility', pressure_list)]

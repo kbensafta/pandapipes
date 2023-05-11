@@ -95,11 +95,11 @@ class Junction(NodeComponent):
         junction_pit = node_pit[f:t, :]
         if len(net._fluid) == 1:
             junction_pit[:, net['_idx_node']['RHO']] = \
-                get_fluid(net, net._fluid[0]).get_density(junction_pit[:, net['_idx_node']['TINIT']])
+                get_fluid(net, net._fluid[0]).get_density()
         else:
             for fluid in net._fluid:
                 junction_pit[:, net['_idx_node'][fluid + '_RHO']] = \
-                    get_fluid(net, fluid).get_density(junction_pit[:, net['_idx_node']['TINIT']])
+                    get_fluid(net, fluid).get_density()
             w = get_lookup(net, 'node', 'w')
             rho = get_lookup(net, 'node', 'rho')
             der_rho_same = get_lookup(net, 'node', 'deriv_rho_same')
@@ -151,18 +151,19 @@ class Junction(NodeComponent):
             normfactor = numerator * get_fluid(net, net._fluid[0]).get_compressibility(p) / (p * NORMAL_TEMPERATURE)
             res_table["rho_kg_per_m3"].values[junctions_active] = junction_pit[:,
                                                                   net['_idx_node']['RHO']] / normfactor
+            res_table["cp_j_per_kg_and_k"].values[junctions_active] = junction_pit[:, net['_idx_branch']['CP']]
+
         else:
             w = get_lookup(net, 'node', 'w')
             mf = junction_pit[:, w]
             p = junction_pit[:, net['_idx_node']['PAMB']] + junction_pit[:, net['_idx_node']['PINIT']]
 
-            normfactor = numerator * get_mixture_compressibility(
-                net, junction_pit[:, net['_idx_node']['PINIT']], mf) / (p * NORMAL_TEMPERATURE)
+            normfactor = numerator * get_mixture_compressibility(net, p, mf) / (p * NORMAL_TEMPERATURE)
             rho = get_mixture_density(net, junction_pit[:, net['_idx_node']['TINIT']], mf) / normfactor
             res_table["rho_kg_per_m3"].values[junctions_active] = rho
             for i, fluid in enumerate(net._fluid):
                 normfactor = numerator * get_fluid(net, fluid).get_compressibility(p) / (p * NORMAL_TEMPERATURE)
-                rho_fluid = get_fluid(net, fluid).get_density(junction_pit[:, net['_idx_node']['TINIT']]) / normfactor
+                rho_fluid = get_fluid(net, fluid).get_density() / normfactor
 
                 res_table["rho_kg_per_m3_%s" % fluid].values[junctions_active] = rho_fluid
                 res_table["w_%s" % fluid].values[junctions_active] = np.round(junction_pit[:, w[i]], 6)
@@ -201,7 +202,7 @@ class Junction(NodeComponent):
         :rtype: (list, bool)
         """
         if len(net._fluid) == 1:
-            return ["p_bar", "t_k", "rho_kg_per_m3"], True
+            return ["p_bar", "t_k", "rho_kg_per_m3", "cp_j_per_kg_and_k"], True
         else:
             default = ["p_bar", "t_k", "rho_kg_per_m3"]
 
