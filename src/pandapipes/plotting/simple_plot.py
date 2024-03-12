@@ -5,7 +5,8 @@
 from itertools import chain
 
 import matplotlib.pyplot as plt
-from pandapower.plotting import draw_collections
+from numpy import char
+from pandapower.plotting import draw_collections,create_annotation_collection
 
 from pandapipes.component_models.circulation_pump_mass_component import CirculationPumpMass
 from pandapipes.component_models.circulation_pump_pressure_component import CirculationPumpPressure
@@ -349,3 +350,77 @@ def create_simple_collections(net, respect_valves=False, respect_in_service=True
         return collections
     return list(chain.from_iterable([list(c) if hasattr(c, "__iter__") else [c]
                                      for c in collections.values()]))
+
+
+def plot_indices(net, respect_valves=False, respect_in_service=True, pipe_width=5.0,
+                              junction_size=1.0, ext_grid_size=1.0, plot_sinks=False,
+                              plot_sources=False, sink_size=1.0, source_size=1.0, valve_size=1.0,
+                              pump_size=1.0, heat_exchanger_size=1.0, pressure_control_size=1.0,
+                              compressor_size=1.0, flow_control_size=1.0,
+                              scale_size=True, junction_color="r", pipe_color='silver',
+                              ext_grid_color='orange', valve_color='silver', pump_color='silver',
+                              heat_exchanger_color='silver', pressure_control_color='silver',
+                              compressor_color='silver', flow_control_color='silver',
+                              library="igraph", as_dict=True, **kwargs):
+
+    simple_collections = create_simple_collections(net, respect_valves=respect_valves,
+                                            respect_in_service=respect_in_service,
+                                            pipe_width=pipe_width,
+                                            junction_size=junction_size,
+                                            ext_grid_size=ext_grid_size,
+                                            plot_sinks=plot_sinks,
+                                            plot_sources=plot_sources,
+                                            sink_size=sink_size,
+                                            source_size=source_size,
+                                            valve_size=valve_size,
+                                            pump_size=pump_size,
+                                            heat_exchanger_size=heat_exchanger_size,
+                                            pressure_control_size=pressure_control_size,
+                                            compressor_size=compressor_size,
+                                            flow_control_size=flow_control_size,
+                                            scale_size=scale_size,
+                                            junction_color=junction_color,
+                                            pipe_color=pipe_color,
+                                            ext_grid_color=ext_grid_color,
+                                            valve_color=valve_color,
+                                            pump_color=pump_color,
+                                            heat_exchanger_color=heat_exchanger_color,
+                                            pressure_control_color=pressure_control_color,
+                                            compressor_color=compressor_color,
+                                            flow_control_color=flow_control_color,
+                                            library=library,
+                                            as_dict=False, **kwargs)
+
+    from matplotlib.font_manager import FontProperties
+    font = FontProperties()
+    font.set_style("italic")
+    junct_coords = net.junction_geodata.values + 5
+    jic = create_annotation_collection(size=15, texts=char.mod('%.0f', net.junction.index), prop= font,
+                                       coords=junct_coords, zorder=200, color='darkred')
+    simple_collections.append(jic)
+
+    from_junct_coords = net.junction_geodata.loc[net.pipe.from_junction.values]
+    to_junct_coords = net.junction_geodata.loc[net.pipe.to_junction.values]
+    pipe_coords = (from_junct_coords.values + to_junct_coords.values) * 1 / 2
+    pic = create_annotation_collection(size=17, texts=char.mod('%.0f', net.pipe.index),prop= font, coords=pipe_coords,
+                                       zorder=200, color='dimgray')
+    simple_collections.append(pic)
+
+    # sic = create_sink_collection(net, sinks= net.sink.index, size=25, patch_edgecolor='silver', line_color='silver',
+    #                              linepipe_widthwidths=, orientation=(np.pi/2), z=100)
+    # simple_collections.append(sic)
+
+    # if plot_nogo_nodes:
+    #     junc_col = create_junction_collection(net,junctions=a_nogo_nodes, size=15, color="blue")
+    #     simple_collections.append(junc_col)
+
+    # if plot_delauney:
+    #     delauney_collection = create_pipe_collection(net, pipes=a_delauney_pipes, use_junction_geodata=True,
+    #                                                  junction_geodata=net.junction_geodata, color="blue",
+    #                                                  linestyles="dotted",linewidths=pipe_width*0.25)
+    #                                                  #,edgecolor="face")
+    #     simple_collections.append(delauney_collection)
+
+    draw_collections(simple_collections)
+    plt.show()
+    return
