@@ -1,0 +1,41 @@
+import pandapipes
+
+net =pandapipes.create_empty_network(fluid="hgas")
+
+pandapipes.create_junction(net, pn_bar= 1, tfluid_k=273.15)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

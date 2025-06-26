@@ -1,0 +1,4 @@
+# derivative (slope) of compressibility
+-0.0022
+
+#Todo: this is the value for methane, it has to be replaced

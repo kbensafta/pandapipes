@@ -1,0 +1,4 @@
+# higher heating value in kWh/kg (at nominal conditions)
+15.42083
+
+#Todo: this is the value for methane, it has to be replaced

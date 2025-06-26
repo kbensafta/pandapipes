@@ -1,0 +1,4 @@
+# slope in 1/bar, offset for linear property
+-0.0022 1
+
+#Todo: this is the value for methane, it has to be replaced

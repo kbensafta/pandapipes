@@ -19,7 +19,8 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 _LIQUIDS = ["water"]
-_GASES = ["air", "lgas", "hgas", "hydrogen", "methane", "biomethane_pure", "biomethane_treated"]
+_GASES = ["air", "lgas", "hgas", "hydrogen", "methane", "biomethane_pure", "biomethane_treated", "10_percent_hydrogen",
+          "20_percent_hydrogen"]
 
 
 class Fluid(JSONSerializableClass):
