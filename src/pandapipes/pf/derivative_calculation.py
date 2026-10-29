@@ -53,20 +53,20 @@ def calculate_derivatives_hydraulic(net, branch_pit_slice, node_pit, options):
     else:
         p_m, der_p_m, der_p_m1 = (p_init_i_abs + p_init_i1_abs) / 2, None, None
 
-    rho = get_branch_real_density(fluid, node_pit, branch_pit)
-    eta = get_branch_real_eta(fluid, node_pit, branch_pit, p_m)
+    rho = get_branch_real_density(fluid, node_pit, b_pit)
+    eta = get_branch_real_eta(fluid, node_pit, b_pit, p_m)
 
     # Darcy Friction factor: lambda
     re = (
-        np.abs(branch_pit[:, MDOTINIT])
-        * branch_pit[:, D]
-        / (eta * branch_pit[:, AREA])
+        np.abs(b_pit[:, IdxBranch.MDOTINIT])
+        * b_pit[:, IdxBranch.D]
+        / (eta * b_pit[:, IdxBranch.AREA])
     )
     mask = (
         ~np.isclose(re, 0)
-        & ~np.isclose(branch_pit[:, LENGTH], 0, rtol=1e-10, atol=1e-11)
+        & ~np.isclose(b_pit[:, IdxBranch.LENGTH], 0, rtol=1e-10, atol=1e-11)
     )
-    k_over_D = branch_pit[mask, K] / branch_pit[mask, D]
+    k_over_D = b_pit[mask, IdxBranch.K] / b_pit[mask, IdxBranch.D]
     lambda_ = np.zeros_like(re)
     der_lambda = np.zeros_like(re)
     friction_factor_model = options["friction_model"]
@@ -74,13 +74,14 @@ def calculate_derivatives_hydraulic(net, branch_pit_slice, node_pit, options):
         friction_factor_model.compute_lambda_and_dlambda_dm(
             k_over_D,
             re[mask],
-            branch_pit[mask, MDOTINIT],
+            b_pit[mask, IdxBranch.MDOTINIT],
         )
     )
 
     b_pit[:, IdxBranch.RE]     = re
     b_pit[:, IdxBranch.LAMBDA] = lambda_
 
+    area = b_pit[:, IdxBranch.AREA]
     if not gas_mode:
         residual_vec, residual_vec_nodes_from, residual_vec_nodes_to, df_dm, df_dm_nodes, df_dp, df_dp1, dp_frict_loss = (
             derivatives_hydraulic_incomp(b_pit, der_lambda, p_init_i_abs, p_init_i1_abs, height_difference, rho, area))

@@ -240,10 +240,10 @@ def calc_medium_pressure_with_derivative_np(p_init_i_abs, p_init_i1_abs):
 
 
 def calc_derived_values_np(node_pit, from_nodes, to_nodes):
-    tinit_branch = (node_pit[from_nodes, TINIT_NODE] + node_pit[to_nodes, TINIT_NODE]) / 2
-    height_difference = node_pit[from_nodes, HEIGHT] - node_pit[to_nodes, HEIGHT]
-    p_init_i_abs = node_pit[from_nodes, PINIT] + node_pit[from_nodes, PAMB]
-    p_init_i1_abs = node_pit[to_nodes, PINIT] + node_pit[to_nodes, PAMB]
+    tinit_branch = (node_pit[from_nodes, IdxNode.TINIT_NODE] + node_pit[to_nodes, IdxNode.TINIT_NODE]) / 2
+    height_difference = node_pit[from_nodes, IdxNode.HEIGHT] - node_pit[to_nodes, IdxNode.HEIGHT]
+    p_init_i_abs = node_pit[from_nodes, IdxNode.PINIT] + node_pit[from_nodes, IdxNode.PAMB]
+    p_init_i1_abs = node_pit[to_nodes, IdxNode.PINIT] + node_pit[to_nodes, IdxNode.PAMB]
     return tinit_branch, height_difference, p_init_i_abs, p_init_i1_abs
 
 def _branches_not_zero_flow(branch_pit):
@@ -256,4 +256,4 @@ def _branches_not_zero_flow(branch_pit):
     :rtype: np.array
     """
     # TODO: is this formulation correct or could there be any caveats?
-    return ~np.isnan(branch_pit[:, MDOTINIT]) & ~np.isclose(branch_pit[:, MDOTINIT], 0, rtol=1e-10, atol=1e-10)
+    return ~np.isnan(branch_pit[:, IdxBranch.MDOTINIT]) & ~np.isclose(branch_pit[:, IdxBranch.MDOTINIT], 0, rtol=1e-10, atol=1e-10)
